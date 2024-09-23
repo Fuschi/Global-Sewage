@@ -1,0 +1,300 @@
+---
+title: "Analysis of Global Sewage for Bacterial and Antimicrobial Resistance Genes"
+output: html_notebook
+---
+
+This notebook explores a dataset containing information on bacterial profiles and antimicrobial resistance genes (ARGs) from global sewage samples. The aim is to identify prevalent bacterial families and assess the distribution and resistance patterns among them.
+
+### Load Libraries and Read Data
+
+```{r}
+# Uncomment the following line to install the 'mgnet' package directly from GitHub if not previously installed
+#devtools::install_github("Fuschi/mgnet")
+```
+
+```{r}
+library(tidyverse)
+library(mgnet)
+```
+
+```{r}
+gs <- readRDS("../data/R/global-sewage.rds")
+gs # Display the structure and a brief overview of the dataset
+```
+
+### Analysis of Taxa Distribution
+
+I conduct an exploration of the distribution of microbial taxa of mOTU AMR genes. 
+The study aims to identify and remove rare taxa that could potentially introduce noise into the dataset. I employ measures of taxa prevalence, sum of abundances, and maximum relative abundance. 
+
+```{r, fig.height=9}
+gs %>%
+  mutate_taxa(
+    prevalence = sum(abun>0)/length(abun),
+    log10_sum_taxa = log10(sum(abun)),
+    log10_max_rel = log10(max(rela))) %>%
+  taxa %>%
+  pivot_longer(cols = c(prevalence, log10_sum_taxa, log10_max_rel),
+               names_to = "measures", values_to = "values") %>%
+  ggplot(aes(x = values)) +
+  geom_histogram(fill = "lightblue", color = "darkblue", bins = 20) +
+  facet_wrap(~ measures + source, scales = "free", nrow = 3) +
+  theme_bw() +
+  theme(axis.text = element_text(size = 12),
+        strip.text = element_text(size = 12))
+```
+
+
+
+```{r, fig.height=5}
+gs %>%
+  split_taxa(source) %>%
+  mutate_sample(
+    sum_sample_origin = sum(abun)) %>%
+  mutate_taxa(
+    prevalence = sum(abun>0)/length(abun),
+    log10_sum_taxa = log10(sum(abun)),
+    log10_max_rel = log10(max(rela)),
+    prevalence_pass = prevalence >= .25,
+    sum_taxa_pass = case_when(source == "mOTU" ~ log10_sum_taxa >= 2,
+                              source == "amr" ~ log10_sum_taxa >= -1),
+    max_rel_pass = case_when(source == "mOTU" ~ log10_max_rel >= -1,
+                             source == "amr" ~ log10_max_rel >= -4)) %>%
+  filter_taxa(prevalence_pass & sum_taxa_pass | max_rel_pass) %>%
+  mutate_sample(
+    lost_count = sum(abun) / sum_sample_origin) %>%
+  mgnet_longer() %>%
+  select(lost_count, source) %>%
+  ggplot(aes(x = lost_count, fill = source)) +
+  geom_histogram(alpha = .9, color = "gray", binwidth = .02) +
+  theme_bw()
+```
+
+```{r}
+gs_source_filt <- gs %>%
+  split_taxa(source) %>%
+  mutate_sample(
+    sum_sample_origin = sum(abun)) %>%
+  mutate_taxa(
+    prevalence = sum(abun>0)/length(abun),
+    log10_sum_taxa = log10(sum(abun)),
+    log10_max_rel = log10(max(rela)),
+    prevalence_pass = prevalence >= .25,
+    sum_taxa_pass = case_when(source == "mOTU" ~ log10_sum_taxa >= 2,
+                              source == "amr" ~ log10_sum_taxa >= -1),
+    max_rel_pass = case_when(source == "mOTU" ~ log10_max_rel >= -1,
+                             source == "amr" ~ log10_max_rel >= -4)) %>%
+  filter_taxa(prevalence_pass & sum_taxa_pass | max_rel_pass) %>%
+  set_norm_CLR()
+```
+
+```{r}
+merge_mgnet <- function(x, y){
+  mgnet(norm = cbind(norm(x), norm(y)),
+        sample = sample(x),
+        taxa = bind_rows(taxa(x), taxa(y)))
+}
+
+gs_netw <- mgnetList(
+  "mOTU-ResFinder" = merge_mgnet(gs_source_filt$mOTU,
+                                 filter_taxa(gs_source_filt$amr, group_amr == "ResFinder")),
+  "mOTU-Functional" = merge_mgnet(gs_source_filt$mOTU,
+                                  filter_taxa(gs_source_filt$amr, group_amr == "Functional"))
+) %>%
+  constructCorrCLRNet(clr_method = "stored", cor_method = "spearman",
+                      thresh_method = "absolute", thresh_value = .6) %>%
+  cluster_signed()
+```
+
+```{r}
+gs_netw_filt <- gs_netw %>%
+  filter_taxa(n() > 1, .by = c("mgnet", "comm_id")) 
+
+map(gs_netw_filt, \(x) sizes(comm(x)))
+
+gs_netw_filt <- gs_netw %>%
+  filter_taxa(n() >= 5, .by = c("mgnet", "comm_id")) 
+```
+
+
+```{r}
+summary_edges <- map(gs_netw_filt, \(x) {
+  df <- igraph::as_data_frame(netw(x))
+  df <- cbind(df, "crossing_comm" = igraph::crossing(comm(x), netw(x)))
+  }) %>%
+  imap(\(x,y) mutate(x, "mgnet" = y, .before = 1)) %>%
+  bind_rows() %>%
+  mutate(
+    new_from = if_else(str_starts(from, "pan_"), to, from),
+    new_to = if_else(str_starts(from, "pan_"), from, to)
+  ) %>%
+  select(-mgnet, -from, -to, from = new_from, to = new_to) %>%
+  left_join(taxa(gs, "tbl")[, c("taxa_id","type", "genus", "family")], 
+            by = join_by(from == taxa_id)) %>%
+  rename(type_from = type, genus_from = genus, family_from = family) %>%
+  left_join(taxa(gs, "tbl")[, c("taxa_id","type", "class_amr")],
+            by = join_by(to == taxa_id)) %>%
+  rename(type_to = type, class_amr_to = class_amr) %>%
+  unite("type", type_from, type_to, sep = "-", remove = FALSE) 
+
+summary_edges_filt <- summary_edges %>%
+  filter(weight>0) %>%
+  filter(type %in% c("mOTU-Functional","mOTU-ResFinder")) %>%
+  mutate(genus_from = if_else(is.na(genus_from), "Unknown", genus_from),
+         family_from = if_else(is.na(family_from), "Unknown", family_from)) %>%
+  select(type, crossing_comm, from, to, weight, genus_from, family_from, type_to, class_amr_to) %>%
+  rename(mOTU = from, amr = to, 
+         genus_mOTU = genus_from, family_mOTU = family_from,
+         type_amr = type_to, class_amr = class_amr_to)
+```
+
+```{r}
+degree_mOTUs <- summary_edges_filt %>%
+  group_by(type, mOTU) %>%
+  summarise(degree = n(), .groups = "drop")
+
+degree_amr <- summary_edges_filt %>%
+  group_by(type, amr) %>%
+  summarise(degree = n(), .groups = "drop")
+
+top_amr_fun <- degree_amr %>%
+  filter(type == "mOTU-Functional", degree >= 30) 
+
+top_amr_res <- degree_amr %>%
+  filter(type == "mOTU-ResFinder", degree >= 5) 
+
+colomap_fam <- summary_edges_filt %>%
+  filter(amr %in% c(top_amr_fun$amr, top_amr_res$amr)) %>%
+  pull(family_mOTU) %>%
+  unique() 
+
+colomap_fam <- setNames(rownames(qualpalr::qualpal(n = length(colomap_fam),
+                                                   colorspace = "rainbow")$RGB),
+                        nm = colomap_fam)
+```
+
+```{r, fig.width=9, fig.height=8}
+summary_edges_filt %>%
+  filter(type == "mOTU-Functional" & amr %in% top_amr_fun$amr) %>%
+  select(amr, family_mOTU) %>%
+  group_by(amr, family_mOTU) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  arrange(desc(n)) %>%
+  mutate(amr = factor(amr, levels = unique(amr))) %>%
+  ggplot(aes(x = amr, y = n, fill = family_mOTU)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = colomap_fam) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5)) +
+  theme(legend.position = "bottom") +
+  ggtitle("functional amr")
+```
+
+
+```{r, fig.width=9, fig.height=7}
+summary_edges_filt %>%
+  filter(type == "mOTU-ResFinder" & amr %in% top_amr_res$amr) %>%
+  select(amr, family_mOTU) %>%
+  group_by(amr, family_mOTU) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  arrange(desc(n)) %>%
+  mutate(amr = factor(amr, levels = unique(amr))) %>%
+  ggplot(aes(x = amr, y = n, fill = family_mOTU)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = colomap_fam) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5)) +
+  theme(legend.position = "bottom") +
+  ggtitle("resfinder amr")
+```
+
+
+```{r}
+#################################################################
+# triangle vertex shape
+mytriangle <- function(coords, v=NULL, params) {
+  vertex.color <- params("vertex", "color")
+  if (length(vertex.color) != 1 && !is.null(v)) {
+    vertex.color <- vertex.color[v]
+  }
+  vertex.size <- 1/200 * params("vertex", "size")
+  if (length(vertex.size) != 1 && !is.null(v)) {
+    vertex.size <- vertex.size[v]
+  }
+
+  symbols(x=coords[,1], y=coords[,2], bg=vertex.color,
+          stars=cbind(vertex.size, vertex.size, vertex.size),
+          add=TRUE, inches=FALSE)
+}
+# clips as a circle
+add_shape("triangle", clip=shapes("circle")$clip,
+                 plot=mytriangle)
+
+#################################################################
+# generic star vertex shape, with a parameter for number of rays
+mystar <- function(coords, v=NULL, params) {
+  vertex.color <- params("vertex", "color")
+  if (length(vertex.color) != 1 && !is.null(v)) {
+    vertex.color <- vertex.color[v]
+  }
+  vertex.size  <- 1/200 * params("vertex", "size")
+  if (length(vertex.size) != 1 && !is.null(v)) {
+    vertex.size <- vertex.size[v]
+  }
+  norays <- params("vertex", "norays")
+  if (length(norays) != 1 && !is.null(v)) {
+    norays <- norays[v]
+  }
+
+  mapply(coords[,1], coords[,2], vertex.color, vertex.size, norays,
+         FUN=function(x, y, bg, size, nor) {
+           symbols(x=x, y=y, bg=bg,
+                   stars=matrix(c(size,size/2), nrow=1, ncol=nor*2),
+                   add=TRUE, inches=FALSE)
+         })
+}
+# no clipping, edges will be below the vertices anyway
+add_shape("star", clip=shape_noclip,
+                 plot=mystar, parameters=list(vertex.norays=5))
+```
+
+
+```{r, fig.width=10, fig.height=10}
+x <- gs_netw_filt$`mOTU-ResFinder`
+par(mar=c(0,0,0,0))
+plot(x, 
+     vertex.label = NA,
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = colomap_fam[pull_taxa(x, "family")],
+     vertex.frame.color = if_else(pull_taxa(x, "source") == "mOTU", NA, "red"))
+```
+
+```{r, fig.height=10, fig.width=10}
+x <- gs_netw_filt$`mOTU-Functional`
+par(mar=c(0,0,0,0))
+set.seed(1)
+plot(x, 
+     vertex.label = NA,
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = colomap_fam[pull_taxa(x, "family")],
+     vertex.frame.color = ifelse(pull_taxa(x, "source") == "mOTU", "gray90", "black"),
+     vertex.frame.width = ifelse(pull_taxa(x, "source") == "mOTU", .2, 1))
+```
+
+### Write Summary Tables
+
+```{r}
+taxa(gs_netw_filt, "tbl") %>%
+  select(-prevalence,-log10_sum_taxa,-log10_max_rel,
+         -prevalence_pass,-sum_taxa_pass,-max_rel_pass) %>%
+  write_tsv("../tables/info_nodes.tsv")
+  
+summary_edges %>%
+  write_tsv("../tables/info_edges_all.tsv")
+
+summary_edges_filt %>%
+  write_tsv("../tables/info_edges_only_mOTU_AMR.tsv")
+```
+
