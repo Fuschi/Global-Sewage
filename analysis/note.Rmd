@@ -44,8 +44,6 @@ gs %>%
         strip.text = element_text(size = 12))
 ```
 
-
-
 ```{r, fig.height=5}
 gs %>%
   split_taxa(source) %>%
@@ -63,10 +61,11 @@ gs %>%
   filter_taxa(prevalence_pass & sum_taxa_pass | max_rel_pass) %>%
   mutate_sample(
     lost_count = sum(abun) / sum_sample_origin) %>%
-  mgnet_longer() %>%
-  select(lost_count, source) %>%
-  ggplot(aes(x = lost_count, fill = source)) +
-  geom_histogram(alpha = .9, color = "gray", binwidth = .02) +
+  meta(.fmt = "tbl") %>%
+  select(lost_count, mgnet) %>%
+  ggplot(aes(x = lost_count, fill = mgnet)) +
+  geom_histogram(position = "dodge", color = "gray", binwidth = .025) +
+  labs(fill = "source") +
   theme_bw()
 ```
 
@@ -91,7 +90,7 @@ gs_source_filt <- gs %>%
 ```{r}
 merge_mgnet <- function(x, y){
   mgnet(norm = cbind(norm(x), norm(y)),
-        sample = sample(x),
+        meta = meta(x),
         taxa = bind_rows(taxa(x), taxa(y)))
 }
 
@@ -101,14 +100,14 @@ gs_netw <- mgnetList(
   "mOTU-Functional" = merge_mgnet(gs_source_filt$mOTU,
                                   filter_taxa(gs_source_filt$amr, group_amr == "Functional"))
 ) %>%
-  constructCorrCLRNet(clr_method = "stored", cor_method = "spearman",
+  constructCorrCLRNet(cor_method = "spearman",
                       thresh_method = "absolute", thresh_value = .6) %>%
   cluster_signed()
 ```
 
 ```{r}
 gs_netw_filt <- gs_netw %>%
-  filter_taxa(n() > 1, .by = c("mgnet", "comm_id")) 
+  filter_taxa(n() > 1, .by = c("mgnet","comm_id")) 
 
 map(gs_netw_filt, \(x) sizes(comm(x)))
 
@@ -162,52 +161,25 @@ top_amr_fun <- degree_amr %>%
 
 top_amr_res <- degree_amr %>%
   filter(type == "mOTU-ResFinder", degree >= 5) 
-
-colomap_fam <- summary_edges_filt %>%
-  filter(amr %in% c(top_amr_fun$amr, top_amr_res$amr)) %>%
-  pull(family_mOTU) %>%
-  unique() 
-
-colomap_fam <- setNames(rownames(qualpalr::qualpal(n = length(colomap_fam),
-                                                   colorspace = "rainbow")$RGB),
-                        nm = colomap_fam)
 ```
 
-```{r, fig.width=9, fig.height=8}
+### Write Summary Tables
+
+```{r}
+taxa(gs_netw_filt, "tbl") %>%
+  select(-prevalence,-log10_sum_taxa,-log10_max_rel,
+         -prevalence_pass,-sum_taxa_pass,-max_rel_pass) %>%
+  write_tsv("../tables/info_nodes.tsv")
+  
+summary_edges %>%
+  write_tsv("../tables/info_edges_all.tsv")
+
 summary_edges_filt %>%
-  filter(type == "mOTU-Functional" & amr %in% top_amr_fun$amr) %>%
-  select(amr, family_mOTU) %>%
-  group_by(amr, family_mOTU) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  arrange(desc(n)) %>%
-  mutate(amr = factor(amr, levels = unique(amr))) %>%
-  ggplot(aes(x = amr, y = n, fill = family_mOTU)) +
-  geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = colomap_fam) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, vjust = .5)) +
-  theme(legend.position = "bottom") +
-  ggtitle("functional amr")
+  write_tsv("../tables/info_edges_only_mOTU_AMR.tsv")
 ```
 
 
-```{r, fig.width=9, fig.height=7}
-summary_edges_filt %>%
-  filter(type == "mOTU-ResFinder" & amr %in% top_amr_res$amr) %>%
-  select(amr, family_mOTU) %>%
-  group_by(amr, family_mOTU) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  arrange(desc(n)) %>%
-  mutate(amr = factor(amr, levels = unique(amr))) %>%
-  ggplot(aes(x = amr, y = n, fill = family_mOTU)) +
-  geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = colomap_fam) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, vjust = .5)) +
-  theme(legend.position = "bottom") +
-  ggtitle("resfinder amr")
-```
-
+## Plots
 
 ```{r}
 #################################################################
@@ -258,43 +230,157 @@ add_shape("star", clip=shape_noclip,
                  plot=mystar, parameters=list(vertex.norays=5))
 ```
 
+```{r}
+colormap_family <- pull_taxa(gs_netw_filt, "family") %>%
+  unlist() %>% table %>% sort(decreasing = T) %>% names %>%
+  colormap_categories(distinct_colors = 40)
+colormap_family <- colormap_family[colormap_family != "#FFFFFFFF"]
 
-```{r, fig.width=10, fig.height=10}
-x <- gs_netw_filt$`mOTU-ResFinder`
-par(mar=c(0,0,0,0))
-plot(x, 
-     vertex.label = NA,
-     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
-     vertex.size = colMeans(norm(x)) + 3,
-     vertex.color = colomap_fam[pull_taxa(x, "family")],
-     vertex.frame.color = if_else(pull_taxa(x, "source") == "mOTU", NA, "red"))
+colormap_class_amr <- pull_taxa(gs_netw_filt, "class_amr") %>%
+  unlist() %>% table %>% sort(decreasing = T) %>% names %>%
+  colormap_categories(distinct_colors = 7)
+colormap_class_amr <- colormap_class_amr[colormap_class_amr != "#FFFFFFFF"]
+
+gs_netw_filt <- gs_netw_filt %>%
+  mutate_taxa(vertex_color_family_classAMR = case_when(
+    source == "mOTU" ~ colormap_family[family],
+    source == "amr" ~ colormap_class_amr[class_amr],
+  )) 
 ```
 
-```{r, fig.height=10, fig.width=10}
-x <- gs_netw_filt$`mOTU-Functional`
-par(mar=c(0,0,0,0))
-set.seed(1)
-plot(x, 
-     vertex.label = NA,
-     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
-     vertex.size = colMeans(norm(x)) + 3,
-     vertex.color = colomap_fam[pull_taxa(x, "family")],
-     vertex.frame.color = ifelse(pull_taxa(x, "source") == "mOTU", "gray90", "black"),
-     vertex.frame.width = ifelse(pull_taxa(x, "source") == "mOTU", .2, 1))
-```
-
-### Write Summary Tables
+### Networks Family
 
 ```{r}
-taxa(gs_netw_filt, "tbl") %>%
-  select(-prevalence,-log10_sum_taxa,-log10_max_rel,
-         -prevalence_pass,-sum_taxa_pass,-max_rel_pass) %>%
-  write_tsv("../tables/info_nodes.tsv")
-  
-summary_edges %>%
-  write_tsv("../tables/info_edges_all.tsv")
+png("../plots/mOTU_amr_family.png", width = 6000, height = 3500, res = 300)
 
-summary_edges_filt %>%
-  write_tsv("../tables/info_edges_only_mOTU_AMR.tsv")
+layout(mat = matrix(c(1, 2, 3, 3), ncol = 2, byrow = T), heights = c(6,1))
+
+x <- gs_netw_filt$`mOTU-ResFinder`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = pull_taxa(x, "vertex_color_family_classAMR"),
+     vertex.frame.color = ifelse(pull_taxa(x, "source") == "mOTU", "gray90", "black"),
+     vertex.frame.width = ifelse(pull_taxa(x, "source") == "mOTU", .2, 1))
+mtext("Resifinder", side = 3, line = -4, adj = 0.1, cex = 2) 
+
+x <- gs_netw_filt$`mOTU-Functional`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = pull_taxa(x, "vertex_color_family_classAMR"),
+     vertex.frame.width = ifelse(pull_taxa(x, "source") == "mOTU", .2, 1))
+mtext("Functional", side = 3, line = -4, adj = .9, cex = 2) 
+
+plot.new()
+legend("left", legend = names(colormap_family), fill = colormap_family, title = "mOTU family", ncol = 9, bty = "n")
+legend("right", legend = names(colormap_class_amr), fill = colormap_class_amr, title = "amr class", ncol = 2, bty = "n")
+#legend(x = .07, y = .2, legend = c("mOTU", "AMR"), pch = c(21, 8),
+#       pt.cex = 2, col = c("gray90", "black"),
+#       pt.bg = c("gray90", "black"), title = "source", ncol = 2)
+
+dev.off()
 ```
 
+### Networks Gut
+
+```{r, fig.height=10, fig.width=14}
+png("../plots/mOTU_amr_gut.png", width = 6000, height = 3000, res = 300)
+
+layout(mat = matrix(c(1, 2), ncol = 2))
+
+x <- gs_netw_filt$`mOTU-ResFinder`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = if_else(pull_taxa(x,is_from_gut), "brown", "lemonchiffon"),
+     #vertex.frame.color = ifelse(pull_taxa(x, "source") == "mOTU", "gray90", "black"),
+     vertex.frame.color = taxa(x)$"comm_id",
+     vertex.frame.width = 3)
+mtext("Resifinder", side = 3, line = -4, adj = 0.1, cex = 2)
+
+x <- gs_netw_filt$`mOTU-Functional`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = if_else(pull_taxa(x,is_from_gut), "brown", "lemonchiffon"),
+     #vertex.frame.color = ifelse(pull_taxa(x, "source") == "mOTU", "gray90", "black"),
+     vertex.frame.color = taxa(x)$"comm_id",
+     vertex.frame.width = 3)
+mtext("Functional", side = 3, line = -4, adj = .9, cex = 2) 
+
+
+dev.off()
+```
+
+### Top-Genes Conneted
+
+```{r, fig.height=10, fig.width=4}
+png("../plots/Gene-Connected-Functional.png", width = 1200, height = 3000, res = 300)
+summary_edges_filt %>%
+  filter(type == "mOTU-Functional" & amr %in% top_amr_fun$amr) %>%
+  select(amr, family_mOTU) %>%
+  group_by(amr, family_mOTU) %>%
+  summarise(`edge number` = n(), .groups = "drop") %>%
+  arrange(desc(`edge number`)) %>%
+  mutate(amr = fct_reorder(amr, `edge number`, .fun = sum, .desc = TRUE)) %>%
+  ggplot(aes(x = amr, y = `edge number`, fill = family_mOTU)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = colormap_family) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5)) +
+  theme(legend.position = "none") +
+  ggtitle("Top Gene-Connected Families by AMR") +
+  coord_flip() +
+  ylim(0,95) +
+  theme(title = element_text(size = 10),
+        axis.title.y = element_blank()) 
+dev.off()
+```
+
+```{r, fig.height=10, fig.width=4}
+png("../plots/Gene-Connected-ResFinder.png", width = 1200, height = 3000, res = 300)
+summary_edges_filt %>%
+  filter(type == "mOTU-ResFinder" & amr %in% top_amr_res$amr) %>%
+  select(amr, family_mOTU) %>%
+  group_by(amr, family_mOTU) %>%
+  summarise(`edge number` = n(), .groups = "drop") %>%
+  arrange(desc(`edge number`)) %>%
+  mutate(amr = fct_reorder(amr, `edge number`, .fun = sum, .desc = TRUE)) %>%
+  ggplot(aes(x = amr, y = `edge number`, fill = family_mOTU)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = colormap_family) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5)) +
+  theme(legend.position = "none") +
+  ggtitle("Top Gene-Connected Families by AMR") +
+  coord_flip() +
+  ylim(0,95) +
+  theme(title = element_text(size = 10),
+        axis.title.y = element_blank()) 
+dev.off()
+```

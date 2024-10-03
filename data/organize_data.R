@@ -2,15 +2,19 @@ library(tidyverse)
 
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
-count_species <- read_csv("RAW/motus_counts/motus_agg_files/mOTU_gs3_counts.csv", name_repair = "minimal")
+count_species <- read_csv("RAW/mOTU_gs3_counts.csv", name_repair = "minimal")
 #count_genera <- read_csv("RAW/motus_counts/motus_agg_files/genus_gs3_counts.csv", name_repair = "minimal")
 #taxa_genera_raw <- read_csv("RAW/motus_counts/motus_agg_files/genus_gs3_taxa_paths.csv", name_repair = "minimal")
-taxa_species_raw <- read_csv("RAW/motus_counts/motus_agg_files/mOTU_gs3_taxa_paths.csv", name_repair = "minimal")
+taxa_species_raw <- read_csv("RAW/mOTU_gs3_taxa_paths.csv", name_repair = "minimal")
 
 df_amr <- read_csv("RAW/counts_clusters.csv")
-#taxa_amr <- readxl::read_excel("RAW/panres_annotations.xlsx", sheet = "wide_format")
-
+taxa_amr <- readxl::read_excel("RAW/panres_annotations.xlsx", sheet = "wide_format")
+#taxa_amr <- read_tsv("RAW/panres_annotations.tsv")
 info_sample <- read_csv("RAW/metadata_fixed.csv") %>% select(-1) 
+taxa_amr <- read_csv("RAW/chosen_gene_metadata.csv")
+
+dict_ncbi_gtbtk <- read_tsv("RAW/mOTUs_ncbi_gtdb_species.tsv")
+uhgg <- read_csv("RAW/uhgg_gtdb_r220.csv")
 
 # SAMPLE METADATA
 #------------------------------------------------------------------------------#
@@ -45,12 +49,12 @@ count_amr <- df_amr %>%
   column_to_rownames("genepid") %>%
   as.matrix()
 
-info_taxa_amr <- df_amr %>%
+taxa_amr <- df_amr %>%
   select(cluster_representative_98, group) %>%
   distinct() %>%
   rename(cluster_id = cluster_representative_98)
-  
-info_taxa_amr <- readxl::read_xlsx("RAW/panres_annotations.xlsx", sheet = "wide_format") %>%
+
+taxa_amr <- readxl::read_xlsx("RAW/panres_annotations.xlsx", sheet = "wide_format") %>%
   filter(!is.na(cluster_representative)) %>%
   select(-c(fa_name,gene_length,database)) %>%
   distinct() %>%
@@ -62,11 +66,32 @@ info_taxa_amr <- readxl::read_xlsx("RAW/panres_annotations.xlsx", sheet = "wide_
   filter(nchar(class) == max(nchar(class))) %>%
   slice(1) %>%
   ungroup() %>%
-  right_join(info_taxa_amr, by = "cluster_id") %>%
+  right_join(taxa_amr, by = "cluster_id") %>%
   relocate(group) %>%
   column_to_rownames("cluster_id")
 
+# tmp <- taxa_amr %>%
+#   filter(cluster_representative_98 %in% colnames(count_amr)) %>%
+#   # group_by(cluster_representative_98) %>%
+#   # filter(database == "resfinder") %>%
+#   # ungroup() %>%
+#   select(cluster_representative_98, group, class, database, resistance_type) %>%
+#   distinct() %>%
+#   group_by(cluster_representative_98) %>%
+#   filter((cluster_representative_98 == "pan_188" & class == "['polymyxin']" & 
+#             resistance_type == "antimicrobial" & database == "resfinder") | 
+#            # Preserve all other rows that are not `pan_188`
+#            cluster_representative_98 != "pan_188") %>%
+#   filter((cluster_representative_98 == "pan_4862" & class == "['quinolone']") | 
+#            # Preserve all other rows that are not `pan_4862`
+#            cluster_representative_98 != "pan_4862") %>%
+#   filter((cluster_representative_98 == "pan_1655" & class == "['quinolone']") | 
+#            # Preserve all other rows that are not `pan_1655`
+#            cluster_representative_98 != "pan_1655")
   
+# taxa_amr <- tibble(taxa_id = colnames(count_amr)) %>%
+#   left_join(taxa_amr, by = join_by(taxa_id == cluster_representative_98)) %>%
+#   column_to_rownames("taxa_id")
 
 
 
@@ -91,6 +116,28 @@ taxa_species <- taxa_species_raw %>%
   slice(1) %>%
   column_to_rownames("name") %>%
   select(-c(ends_with("_id"), path))
+
+# Example usage where you iterate over each element of species_gtdb and compare it to all of uhgg$SPECIES
+dict_ncbi_gtbtk <- dict_ncbi_gtbtk %>%
+  mutate(
+    human_gut = map_chr(species_gtdb, ~ {
+      matching_species <- uhgg$SPECIES[str_detect(.x, fixed(uhgg$SPECIES))]
+      if (length(matching_species) > 0) {
+        return(matching_species[1])  # Return the first match if found
+      } else {
+        return(NA_character_)  # Return NA if no match
+      }
+    })
+  )
+
+taxa_species <- taxa_species %>%
+  rownames_to_column("taxa_id") %>%
+  left_join(dict_ncbi_gtbtk, by = join_by(taxa_id == mOTU_ncbi_name)) %>%
+  mutate(is_from_gut = if_else(is.na(human_gut), FALSE, TRUE)) %>%
+  group_by(taxa_id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  column_to_rownames("taxa_id")
 
 #count_species <- count_species[, rownames(taxa_species)]
 #count_species <- count_species[rownames(info_sample)]
@@ -133,9 +180,11 @@ info_sample <- info_sample[sample_intersection,]
 
 # MERGE TAXA AND COUNT INFORMATION IN AMR
 #------------------------------------------------------------------------------#
-all(colnames(count_amr) %in% rownames(info_taxa_amr))
-info_taxa_amr <- info_taxa_amr[colnames(count_amr), , drop = F]
-info_taxa_amr <- info_taxa_amr %>% mutate(source = "amr", .before = 1) %>%
+all(colnames(count_amr) %in% rownames(taxa_amr))
+taxa_amr <- taxa_amr[colnames(count_amr), , drop = F]
+#taxa_amr <- taxa_amr %>% mutate(source = "amr", .before = 1) %>%
+#  rename(class_amr = class, group_amr = group, resistance_type_amr = resistance_type) 
+taxa_amr <- taxa_amr %>% mutate(source = "amr", .before = 1) %>%
   rename(class_amr = class, group_amr = group, biocide_class_amr = biocide_class,
          metal_class_amr = metal_class) 
 
@@ -151,20 +200,20 @@ library(mgnet)
 
 gs_mOTU <- mgnet(
   abun = count_species,
-  sample = info_sample,
+  meta = info_sample,
   taxa = taxa_species
 )
 
 gs_amr <- mgnet(
   abun = as.matrix(count_amr),
-  sample = info_sample,
-  taxa = info_taxa_amr
+  meta = info_sample,
+  taxa = taxa_amr
 )
 
 gs <- mgnet(
   abun = cbind(as.matrix(count_species), as.matrix(count_amr)),
-  sample = info_sample,
-  taxa = bind_rows(taxa_species, info_taxa_amr)
+  meta = info_sample,
+  taxa = bind_rows(taxa_species, taxa_amr)
 )
 
 gs@taxa <- taxa(gs) %>% mutate(type = case_when(
