@@ -119,7 +119,7 @@ gs_netw_filt <- gs_netw %>%
 ```{r}
 summary_edges <- map(gs_netw_filt, \(x) {
   df <- igraph::as_data_frame(netw(x))
-  df <- cbind(df, "crossing_comm" = igraph::crossing(comm(x), netw(x)))
+  df <- cbind(df, "crossing_communities" = igraph::crossing(comm(x), netw(x)))
   }) %>%
   imap(\(x,y) mutate(x, "mgnet" = y, .before = 1)) %>%
   bind_rows() %>%
@@ -127,24 +127,18 @@ summary_edges <- map(gs_netw_filt, \(x) {
     new_from = if_else(str_starts(from, "pan_"), to, from),
     new_to = if_else(str_starts(from, "pan_"), from, to)
   ) %>%
-  select(-mgnet, -from, -to, from = new_from, to = new_to) %>%
-  left_join(taxa(gs, "tbl")[, c("taxa_id","type", "genus", "family")], 
-            by = join_by(from == taxa_id)) %>%
-  rename(type_from = type, genus_from = genus, family_from = family) %>%
-  left_join(taxa(gs, "tbl")[, c("taxa_id","type", "class_amr")],
-            by = join_by(to == taxa_id)) %>%
-  rename(type_to = type, class_amr_to = class_amr) %>%
-  unite("type", type_from, type_to, sep = "-", remove = FALSE) 
+  select(mgnet, weight, -from, -to, from = new_from, to = new_to, crossing_communities) %>%
+  rename(node_i = from, node_j = to) %>%
+  left_join(taxa(gs, "tbl") %>% rename_with(~paste0(., "_i"), -taxa_id), 
+            by = join_by(node_i == taxa_id)) %>%
+  left_join(taxa(gs, "tbl") %>% rename_with(~paste0(., "_j"), -taxa_id), 
+            by = join_by(node_j == taxa_id)) %>%
+  unite("link_type", type_i, type_j, sep = "-", remove = FALSE) %>%
+  relocate(link_type, .before = crossing_communities)
 
 summary_edges_filt <- summary_edges %>%
   filter(weight>0) %>%
-  filter(type %in% c("mOTU-Functional","mOTU-ResFinder")) %>%
-  mutate(genus_from = if_else(is.na(genus_from), "Unknown", genus_from),
-         family_from = if_else(is.na(family_from), "Unknown", family_from)) %>%
-  select(type, crossing_comm, from, to, weight, genus_from, family_from, type_to, class_amr_to) %>%
-  rename(mOTU = from, amr = to, 
-         genus_mOTU = genus_from, family_mOTU = family_from,
-         type_amr = type_to, class_amr = class_amr_to)
+  filter(link_type %in% c("mOTU-Functional","mOTU-ResFinder")) 
 ```
 
 ```{r}
