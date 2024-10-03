@@ -1769,101 +1769,10 @@ the distribution and resistance patterns among them.</p>
 <!-- rnb-text-begin -->
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeSh0aWR5dmVyc2UpXG5gYGAifQ== -->
-<pre class="r"><code>library(tidyverse)</code></pre>
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeSh0aWR5dmVyc2UpXG5saWJyYXJ5KG1nbmV0KVxuYGBgIn0= -->
+<pre class="r"><code>library(tidyverse)
+library(mgnet)</code></pre>
 <!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoi4pSA4pSAIEF0dGFjaGluZyBjb3JlIHRpZHl2ZXJzZSBwYWNrYWdlcyDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAgdGlkeXZlcnNlIDIuMC4wIOKUgOKUgFxu4pyUIGRwbHlyICAgICAxLjEuNCAgICAg4pyUIHJlYWRyICAgICAyLjEuNVxu4pyUIGZvcmNhdHMgICAxLjAuMCAgICAg4pyUIHN0cmluZ3IgICAxLjUuMVxu4pyUIGdncGxvdDIgICAzLjUuMSAgICAg4pyUIHRpYmJsZSAgICAzLjIuMVxu4pyUIGx1YnJpZGF0ZSAxLjkuMyAgICAg4pyUIHRpZHlyICAgICAxLjMuMVxu4pyUIHB1cnJyICAgICAxLjAuMiAgICAg4pSA4pSAIENvbmZsaWN0cyDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAgdGlkeXZlcnNlX2NvbmZsaWN0cygpIOKUgOKUgFxu4pyWIGRwbHlyOjpmaWx0ZXIoKSBtYXNrcyBzdGF0czo6ZmlsdGVyKClcbuKcliBkcGx5cjo6bGFnKCkgICAgbWFza3Mgc3RhdHM6OmxhZygpXG7ihLkgVXNlIHRoZSBcdTAwMWJdODs7aHR0cDovL2NvbmZsaWN0ZWQuci1saWIub3JnL1x1MDAwN2NvbmZsaWN0ZWQgcGFja2FnZVx1MDAxYl04OztcdTAwMDcgdG8gZm9yY2UgYWxsIGNvbmZsaWN0cyB0byBiZWNvbWUgZXJyb3JzXG4ifQ== -->
-<pre><code>── Attaching core tidyverse packages ─────────────────────────────────────────────────────────────────── tidyverse 2.0.0 ──
-✔ dplyr     1.1.4     ✔ readr     2.1.5
-✔ forcats   1.0.0     ✔ stringr   1.5.1
-✔ ggplot2   3.5.1     ✔ tibble    3.2.1
-✔ lubridate 1.9.3     ✔ tidyr     1.3.1
-✔ purrr     1.0.2     ── Conflicts ───────────────────────────────────────────────────────────────────────────────────── tidyverse_conflicts() ──
-✖ dplyr::filter() masks stats::filter()
-✖ dplyr::lag()    masks stats::lag()
-ℹ Use the ]8;;http://conflicted.r-lib.org/conflicted package]8;; to force all conflicts to become errors</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeShtZ25ldClcbmBgYCJ9 -->
-<pre class="r"><code>library(mgnet)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiQ2FyaWNhbWVudG8gZGVsIHBhY2NoZXR0byByaWNoaWVzdG86IGlncmFwaFxuXG5DYXJpY2FtZW50byBwYWNjaGV0dG86IOKAmGlncmFwaOKAmVxuXG5JIHNlZ3VlbnRpIG9nZ2V0dGkgc29ubyBtYXNjaGVyYXRpIGRhIOKAmHBhY2thZ2U6bHVicmlkYXRl4oCZOlxuXG4gICAgJS0tJSwgdW5pb25cblxuSSBzZWd1ZW50aSBvZ2dldHRpIHNvbm8gbWFzY2hlcmF0aSBkYSDigJhwYWNrYWdlOmRwbHly4oCZOlxuXG4gICAgYXNfZGF0YV9mcmFtZSwgZ3JvdXBzLCB1bmlvblxuXG5JIHNlZ3VlbnRpIG9nZ2V0dGkgc29ubyBtYXNjaGVyYXRpIGRhIOKAmHBhY2thZ2U6cHVycnLigJk6XG5cbiAgICBjb21wb3NlLCBzaW1wbGlmeVxuXG5JbCBzZWd1ZW50ZSBvZ2dldHRvIMOoIG1hc2NoZXJhdG8gZGEg4oCYcGFja2FnZTp0aWR5cuKAmTpcblxuICAgIGNyb3NzaW5nXG5cbklsIHNlZ3VlbnRlIG9nZ2V0dG8gw6ggbWFzY2hlcmF0byBkYSDigJhwYWNrYWdlOnRpYmJsZeKAmTpcblxuICAgIGFzX2RhdGFfZnJhbWVcblxuSSBzZWd1ZW50aSBvZ2dldHRpIHNvbm8gbWFzY2hlcmF0aSBkYSDigJhwYWNrYWdlOnN0YXRz4oCZOlxuXG4gICAgZGVjb21wb3NlLCBzcGVjdHJ1bVxuXG5JbCBzZWd1ZW50ZSBvZ2dldHRvIMOoIG1hc2NoZXJhdG8gZGEg4oCYcGFja2FnZTpiYXNl4oCZOlxuXG4gICAgdW5pb25cblxuQ2FyaWNhbWVudG8gZGVsIHBhY2NoZXR0byByaWNoaWVzdG86IHJsYW5nXG5cbkNhcmljYW1lbnRvIHBhY2NoZXR0bzog4oCYcmxhbmfigJlcblxuSWwgc2VndWVudGUgb2dnZXR0byDDqCBtYXNjaGVyYXRvIGRhIOKAmHBhY2thZ2U6aWdyYXBo4oCZOlxuXG4gICAgaXNfbmFtZWRcblxuSSBzZWd1ZW50aSBvZ2dldHRpIHNvbm8gbWFzY2hlcmF0aSBkYSDigJhwYWNrYWdlOnB1cnJy4oCZOlxuXG4gICAgJUAlLCBmbGF0dGVuLCBmbGF0dGVuX2NociwgZmxhdHRlbl9kYmwsIGZsYXR0ZW5faW50LCBmbGF0dGVuX2xnbCwgZmxhdHRlbl9yYXcsIGludm9rZSwgc3BsaWNlXG5cbkNhcmljYW1lbnRvIGRlbCBwYWNjaGV0dG8gcmljaGllc3RvOiBwc3ljaFxuXG5DYXJpY2FtZW50byBwYWNjaGV0dG86IOKAmHBzeWNo4oCZXG5cbkkgc2VndWVudGkgb2dnZXR0aSBzb25vIG1hc2NoZXJhdGkgZGEg4oCYcGFja2FnZTpnZ3Bsb3Qy4oCZOlxuXG4gICAgJSslLCBhbHBoYVxuXG5DYXJpY2FtZW50byBkZWwgcGFjY2hldHRvIHJpY2hpZXN0bzogcXVhbHBhbHJcbkNhcmljYW1lbnRvIGRlbCBwYWNjaGV0dG8gcmljaGllc3RvOiBtYWdyaXR0clxuXG5DYXJpY2FtZW50byBwYWNjaGV0dG86IOKAmG1hZ3JpdHRy4oCZXG5cbklsIHNlZ3VlbnRlIG9nZ2V0dG8gw6ggbWFzY2hlcmF0byBkYSDigJhwYWNrYWdlOnJsYW5n4oCZOlxuXG4gICAgc2V0X25hbWVzXG5cbklsIHNlZ3VlbnRlIG9nZ2V0dG8gw6ggbWFzY2hlcmF0byBkYSDigJhwYWNrYWdlOnB1cnJy4oCZOlxuXG4gICAgc2V0X25hbWVzXG5cbklsIHNlZ3VlbnRlIG9nZ2V0dG8gw6ggbWFzY2hlcmF0byBkYSDigJhwYWNrYWdlOnRpZHly4oCZOlxuXG4gICAgZXh0cmFjdFxuXG5DYXJpY2FtZW50byBkZWwgcGFjY2hldHRvIHJpY2hpZXN0bzogdGlkeXNlbGVjdFxuXG5DYXJpY2FtZW50byBwYWNjaGV0dG86IOKAmG1nbmV04oCZXG5cbklsIHNlZ3VlbnRlIG9nZ2V0dG8gw6ggbWFzY2hlcmF0byBkYSDigJhwYWNrYWdlOmJhc2XigJk6XG5cbiAgICBub3JtXG4ifQ== -->
-<pre><code>Caricamento del pacchetto richiesto: igraph
-
-Caricamento pacchetto: ‘igraph’
-
-I seguenti oggetti sono mascherati da ‘package:lubridate’:
-
-    %--%, union
-
-I seguenti oggetti sono mascherati da ‘package:dplyr’:
-
-    as_data_frame, groups, union
-
-I seguenti oggetti sono mascherati da ‘package:purrr’:
-
-    compose, simplify
-
-Il seguente oggetto è mascherato da ‘package:tidyr’:
-
-    crossing
-
-Il seguente oggetto è mascherato da ‘package:tibble’:
-
-    as_data_frame
-
-I seguenti oggetti sono mascherati da ‘package:stats’:
-
-    decompose, spectrum
-
-Il seguente oggetto è mascherato da ‘package:base’:
-
-    union
-
-Caricamento del pacchetto richiesto: rlang
-
-Caricamento pacchetto: ‘rlang’
-
-Il seguente oggetto è mascherato da ‘package:igraph’:
-
-    is_named
-
-I seguenti oggetti sono mascherati da ‘package:purrr’:
-
-    %@%, flatten, flatten_chr, flatten_dbl, flatten_int, flatten_lgl, flatten_raw, invoke, splice
-
-Caricamento del pacchetto richiesto: psych
-
-Caricamento pacchetto: ‘psych’
-
-I seguenti oggetti sono mascherati da ‘package:ggplot2’:
-
-    %+%, alpha
-
-Caricamento del pacchetto richiesto: qualpalr
-Caricamento del pacchetto richiesto: magrittr
-
-Caricamento pacchetto: ‘magrittr’
-
-Il seguente oggetto è mascherato da ‘package:rlang’:
-
-    set_names
-
-Il seguente oggetto è mascherato da ‘package:purrr’:
-
-    set_names
-
-Il seguente oggetto è mascherato da ‘package:tidyr’:
-
-    extract
-
-Caricamento del pacchetto richiesto: tidyselect
-
-Caricamento pacchetto: ‘mgnet’
-
-Il seguente oggetto è mascherato da ‘package:base’:
-
-    norm</code></pre>
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <!-- rnb-text-end -->
