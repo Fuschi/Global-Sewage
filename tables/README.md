@@ -42,7 +42,7 @@ This directory contains summary tables that provide insights and statistical dat
 - **mgnet**: Identifies the network analysis (e.g., mOTU+resfinder or mOTU+functional) from which the edge data is derived.
 - **weight**: Quantitative measure of the connection correlation of the CLR abundances between two nodes.
 - **node_i**, **node_j**: Identifiers for the nodes at either end of an edge.
-- **link_type**: Describes the nature of the link (e.g., genetic, functional, resistance-related).
+- **link_type**: Describes the nature of the link (e.g. mOTU-ResFinder, mOTU-mOTU, mOTU-Functional...).
 - **crossing_communities**: Indicates whether the edge crosses between different microbial communities.
 
 **Metadata for Node i** (suffix `_i` indicates data for `node_i`):
