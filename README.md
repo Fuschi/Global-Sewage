@@ -17,5 +17,5 @@ To run the code and reproduce the analyses, you will need the **mgnet** package 
 
 ```
 library("devtools")
-install_github("Fuschi/mgnet", ref = "a6642dff48cfbe5183d8f9d8bc9e983aaf5dcc05")
+install_github("Fuschi/mgnet", ref = "3c26e21969b6d92eaa371e44111f8233647bb8c4")
 ```
