@@ -119,7 +119,7 @@ gs_netw_filt <- gs_netw %>%
 ```{r}
 summary_edges <- map(gs_netw_filt, \(x) {
   df <- igraph::as_data_frame(netw(x))
-  df <- cbind(df, "crossing_communities" = igraph::crossing(comm(x), netw(x)))
+  df <- cbind(df, "crossing_comm" = igraph::crossing(comm(x), netw(x)))
   }) %>%
   imap(\(x,y) mutate(x, "mgnet" = y, .before = 1)) %>%
   bind_rows() %>%
@@ -127,18 +127,24 @@ summary_edges <- map(gs_netw_filt, \(x) {
     new_from = if_else(str_starts(from, "pan_"), to, from),
     new_to = if_else(str_starts(from, "pan_"), from, to)
   ) %>%
-  select(mgnet, weight, -from, -to, from = new_from, to = new_to, crossing_communities) %>%
-  rename(node_i = from, node_j = to) %>%
-  left_join(taxa(gs, "tbl") %>% rename_with(~paste0(., "_i"), -taxa_id), 
-            by = join_by(node_i == taxa_id)) %>%
-  left_join(taxa(gs, "tbl") %>% rename_with(~paste0(., "_j"), -taxa_id), 
-            by = join_by(node_j == taxa_id)) %>%
-  unite("link_type", type_i, type_j, sep = "-", remove = FALSE) %>%
-  relocate(link_type, .before = crossing_communities)
+  select(-mgnet, -from, -to, from = new_from, to = new_to) %>%
+  left_join(taxa(gs, "tbl")[, c("taxa_id","type", "genus", "family")], 
+            by = join_by(from == taxa_id)) %>%
+  rename(type_from = type, genus_from = genus, family_from = family) %>%
+  left_join(taxa(gs, "tbl")[, c("taxa_id","type", "class_amr")],
+            by = join_by(to == taxa_id)) %>%
+  rename(type_to = type, class_amr_to = class_amr) %>%
+  unite("type", type_from, type_to, sep = "-", remove = FALSE) 
 
 summary_edges_filt <- summary_edges %>%
   filter(weight>0) %>%
-  filter(link_type %in% c("mOTU-Functional","mOTU-ResFinder")) 
+  filter(type %in% c("mOTU-Functional","mOTU-ResFinder")) %>%
+  mutate(genus_from = if_else(is.na(genus_from), "Unknown", genus_from),
+         family_from = if_else(is.na(family_from), "Unknown", family_from)) %>%
+  select(type, crossing_comm, from, to, weight, genus_from, family_from, type_to, class_amr_to) %>%
+  rename(mOTU = from, amr = to, 
+         genus_mOTU = genus_from, family_mOTU = family_from,
+         type_amr = type_to, class_amr = class_amr_to)
 ```
 
 ```{r}
@@ -160,6 +166,17 @@ top_amr_res <- degree_amr %>%
 ### Write Summary Tables
 
 ```{r}
+for(mg in names(gs_netw_filt)){
+  gs_netw_filt[[mg]]@taxa <- cbind(taxa(gs_netw_filt[[mg]]),
+                                    "degree_intra_positve" = degree_mgnet(gs_netw_filt[[mg]],
+                                                                          "positive", "intra"),
+                                    "degree_intra_negative" = degree_mgnet(gs_netw_filt[[mg]],
+                                                                          "negative", "intra"),
+                                    "degree_extra_positve" = degree_mgnet(gs_netw_filt[[mg]],
+                                                                          "positive", "extra"),
+                                    "degree_extra_negative" = degree_mgnet(gs_netw_filt[[mg]],
+                                                                          "negative", "extra"))
+}
 taxa(gs_netw_filt, "tbl") %>%
   select(-prevalence,-log10_sum_taxa,-log10_max_rel,
          -prevalence_pass,-sum_taxa_pass,-max_rel_pass) %>%
@@ -378,3 +395,140 @@ summary_edges_filt %>%
         axis.title.y = element_blank()) 
 dev.off()
 ```
+
+## All networks toghter
+
+```{r, fig.width=12, fig.height=14}
+png("../plots/all.png", width = 6000, height = 7000, res = 300)
+layout(mat = matrix(c(1, 2, 3, 3, 4, 5, 6, 6), ncol = 2, byrow = T), heights = c(6,1,6,1))
+
+# family resfinder
+#------------------------------------------------------------------------------#
+x <- gs_netw_filt$`mOTU-ResFinder`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     posCol = rgb(0, 0, 1, .5), negCol = rgb(1, 0, 0, .5),
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = pull_taxa(x, "vertex_color_family_classAMR"),
+     #vertex.frame.color = ifelse(pull_taxa(x, "source") == "mOTU", "gray90", "black"),
+     vertex.frame.width = ifelse(pull_taxa(x, "source") == "mOTU", .2, 1))
+mtext("A", side = 3, line = -4, adj = 0.1, cex = 2) 
+
+# family functional
+#------------------------------------------------------------------------------#
+x <- gs_netw_filt$`mOTU-Functional`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     posCol = rgb(0, 0, 1, .5), negCol = rgb(1, 0, 0, .5),
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = pull_taxa(x, "vertex_color_family_classAMR"),
+     vertex.frame.width = ifelse(pull_taxa(x, "source") == "mOTU", .2, 1))
+mtext("B", side = 3, line = -4, adj = .9, cex = 2) 
+
+# legends
+#------------------------------------------------------------------------------#
+plot.new()
+legend("left", legend = names(colormap_family), fill = colormap_family, title = "mOTU family", 
+       ncol = 9, bty = "n", cex = 1.1, pt.cex = 1.1)
+legend("right", legend = names(colormap_class_amr), fill = colormap_class_amr, title = "amr class",
+       ncol = 2, bty = "n", cex = 1.1, pt.cex = 1.1)
+
+# gut resfinder
+#------------------------------------------------------------------------------#
+x <- gs_netw_filt$`mOTU-ResFinder`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     posCol = rgb(0, 0, 1, .5), negCol = rgb(1, 0, 0, .5),
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = if_else(pull_taxa(x,is_from_gut), "brown", "lemonchiffon"),
+     #vertex.frame.color = ifelse(pull_taxa(x, "source") == "mOTU", "gray90", "black"),
+     vertex.frame.color = taxa(x)$"comm_id",
+     vertex.frame.width = 3)
+mtext("C", side = 3, line = -4, adj = 0.1, cex = 2)
+
+# gut functional
+#------------------------------------------------------------------------------#
+x <- gs_netw_filt$`mOTU-Functional`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     posCol = rgb(0, 0, 1, .5), negCol = rgb(1, 0, 0, .5),
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = if_else(pull_taxa(x,is_from_gut), "brown", "lemonchiffon"),
+     #vertex.frame.color = ifelse(pull_taxa(x, "source") == "mOTU", "gray90", "black"),
+     vertex.frame.color = taxa(x)$"comm_id",
+     vertex.frame.width = 3)
+mtext("D", side = 3, line = -4, adj = .9, cex = 2) 
+
+# legend
+#------------------------------------------------------------------------------#
+plot.new()
+dev.off()
+```
+
+
+
+## GGPLOT NETWORKS
+
+```{r}
+gs_netw_filt <- gs_netw_filt %>%
+  mutate_taxa(mgnet_comm = paste(mgnet, comm_id, sep =  "_"))
+
+palette_communities <- colormap_categories(taxa(gs_netw_filt, "tbl")$mgnet_comm,
+                                           colorspace = "rainbow")
+
+gs_netw_filt <- gs_netw_filt %>% 
+  mutate_taxa(
+    mgnet_comm_col = palette_communities[mgnet_comm],
+    family_col = colormap_family[family],
+    class_amr_col = colormap_class_amr[class_amr],
+    vertex_col = if_else(source == "mOTU", adjustcolor(family_col,alpha.f = .5), class_amr_col),
+    vertex_shape = if_else(source == "mOTU", 21, 23),
+    vertex_size = mean(norm) + 3,
+    vertex_stroke = if_else(source == "mOTU", .75, .75))
+```
+
+```{r}
+x <- gs_netw_filt$`mOTU-Functional`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+
+png("test2.png", width = 3000, height = 3000, res = 300)
+ggraph(netw(x, add_vertex_attr = T), layout = layout_x) +
+  theme_void() +
+  geom_node_point( aes(fill = vertex_col, 
+                       shape = vertex_shape,
+                       size = vertex_size,
+                       stroke = vertex_stroke)) + 
+  scale_shape_identity() +
+  scale_fill_identity() +
+  scale_size_identity() +
+  theme(legend.position = "none") 
+dev.off()
+```
+
+
