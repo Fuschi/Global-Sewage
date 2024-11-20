@@ -1,0 +1,254 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+
+abun_mOTU <- read_csv("RAW/mOTU_motus_pad_agg_counts.csv", name_repair = "minimal")
+taxa_mOTU <- read_csv("RAW/mOTU_motus_pad_agg_taxa_paths.csv", name_repair = "minimal")
+
+df_amr <- read_csv("RAW/counts_clusters.csv")
+info_sample <- read_csv("RAW/metadata_fixed.csv") %>% select(-1) 
+taxa_amr <- read_csv("RAW/chosen_gene_metadata.csv")
+
+dict_ncbi_gtbtk <- read_tsv("RAW/mOTUs_ncbi_gtdb_species.tsv")
+uhgg <- read_csv("RAW/uhgg_gtdb_r220.csv")
+```
+
+```{r}
+# SAMPLE METADATA
+#------------------------------------------------------------------------------#
+info_sample <- info_sample %>%
+  select(genepid, Region, country_alt, city, year, lat, lon) %>%
+  distinct() %>%
+  filter(year != 2023 & !is.na(genepid)) %>%
+  column_to_rownames("genepid") 
+```
+
+```{r}
+# AMR
+#------------------------------------------------------------------------------#
+df_amr <- df_amr %>%
+  mutate(sample_name = if_else(sample_name == "DTU_2017_314_1_MG_CI_YA", 
+                               "DTU_2017_1011594_1_MG_CI_YA", 
+                               sample_name)) %>%
+  filter(!str_starts(sample_name, "ERR")) %>%
+  mutate(genepid = str_split(sample_name, "_") %>% map_chr(3),
+         replicate_id = str_split(sample_name, "_") %>% map_chr(4), .after = genepid) %>%
+  unite("sample_id", genepid:replicate_id, sep = "_", remove = F) %>%
+  unite("sample_long", sample_name:sample_name2, sep = "_", remove = F) %>%
+  mutate(sample_sum = sum(fragmentCountAln_adj), .by = "sample_long") %>%
+  ungroup() %>%
+  arrange(desc(sample_sum)) %>%
+  group_by(genepid, cluster_representative_98) %>%
+  slice(1) %>%
+  ungroup()
+
+
+```
+
+
+```{r}
+# ABUN AMR
+#------------------------------------------------------------------------------#
+abun_amr <- df_amr %>%
+  select(genepid, cluster_representative_98, fragmentCountAln_adj) %>%
+  pivot_wider(names_from = "cluster_representative_98", 
+              values_from = "fragmentCountAln_adj", values_fill = 0) %>%
+  column_to_rownames("genepid") %>%
+  as.matrix()
+```
+
+
+```{r}
+# TAXA AMR
+#------------------------------------------------------------------------------#
+taxa_amr_clean <- taxa_amr %>%
+  select(-ResFinder, -ResFinderFG, -csabapal, -fa_name) %>%
+  mutate(database_priority = factor(database, levels = c("resfinder", "functional_amr", "csabapal"), ordered = TRUE)) %>%
+  group_by(cluster_representative_98) %>%
+  filter(database_priority == max(database_priority)) %>%
+  ungroup() %>%
+  select(-database_priority) %>%
+  distinct() %>%
+  select(-group) %>%
+  distinct() %>%
+  select(-gene_length) %>%
+  distinct() %>%
+  select(-cluster_representative_90) %>%
+  distinct() %>%
+  mutate(class_length = nchar(gsub("\\W", "", class))) %>%
+  group_by(cluster_representative_98) %>%
+  slice_max(class_length) %>%
+  select(-class_length) %>%
+  mutate(
+    class = sapply(class, function(x) {
+      # Extract elements between brackets, split by comma, trim spaces, sort, and reconstruct
+      elements <- str_extract(x, "\\[.*\\]") %>%
+        gsub("\\[|\\]|'", "", .) %>%
+        str_split(",") %>%
+        unlist() %>%
+        trimws() %>%
+        sort()
+      sprintf("['%s']", paste(elements, collapse = "', '"))
+    })) %>%
+  distinct() %>%
+  select(-resistance_type) %>%
+  distinct() %>%
+  mutate(group = if_else(database == "resfinder", "Resfinder", "Functional")) %>%
+  column_to_rownames("cluster_representative_98") 
+
+colnames(taxa_amr_clean) <- paste("amr", colnames(taxa_amr_clean), sep = "_")
+
+taxa_amr_clean <- taxa_amr_clean %>%
+  mutate(source = "amr", .before = 1)
+```
+
+## MOTUs
+
+```{r, message=FALSE, warning=FALSE}
+taxa_mOTU <- read_csv("RAW/mOTU_motus_pad_agg_taxa_paths.csv") %>%
+  separate(path_taxs, sep = ";", remove = F,
+           into = c("kingdom_id", "phylum_id", "class_id", "order_id","family_id", "genus_id", "mOTU_id")) %>%
+  mutate(kingdom_ncbi = taxizedb::taxid2name(kingdom_id),
+         phylum_ncbi = taxizedb::taxid2name(phylum_id),
+         class_ncbi = taxizedb::taxid2name(class_id),
+         order_ncbi = taxizedb::taxid2name(order_id),
+         family_ncbi = taxizedb::taxid2name(family_id),
+         genus_ncbi = taxizedb::taxid2name(genus_id))
+
+# taxa_mOTU <- taxa_mOTU %>%
+#   rowwise() %>%
+#   mutate(
+#     classified_rank = case_when(
+#       mOTU_id != "0" ~ "mOTU_ncbi",
+#       genus_id != "0" ~ "genus_ncbi",
+#       family_id != "0" ~ "family_ncbi",
+#       order_id != "0" ~ "order_ncbi",
+#       class_id != "0" ~ "class_ncbi",
+#       phylum_id != "0" ~ "phylum_ncbi",
+#       kingdom_id != "0" ~ "kingdom_ncbi",
+#       TRUE ~ "unclassified"
+#     )) 
+
+# taxa_mOTU <- taxa_mOTU %>% mutate(
+#   kingdom = if_else(is.na(kingdom_ncbi), "unclassified_kingdom", kingdom_ncbi),
+#   phylum = if_else(is.na(phylum_ncbi), paste0("unclassified_", cur_data()[[classified_rank]]), kingdom_ncbi),
+#   class = if_else(is.na(class_ncbi), paste0("unclassified_", cur_data()[[classified_rank]]), class_ncbi),
+#   order = if_else(is.na(order_ncbi), paste0("unclassified_", cur_data()[[classified_rank]]), order_ncbi),
+#   family = if_else(is.na(family_ncbi), paste0("unclassified_", cur_data()[[classified_rank]]), family_ncbi),
+#   genus = if_else(is.na(genus_ncbi), paste0("unclassified_", cur_data()[[classified_rank]]), genus_ncbi)
+#   )
+```
+
+
+```{r, message=FALSE}
+abun_mOTU <- read_csv("mOTU/mOTU_motus_pad_agg_counts.csv") %>%
+  column_to_rownames("genepid") %>%
+  as.matrix()
+```
+
+```{r}
+taxa_mOTU_clean <- taxa_mOTU %>%
+  group_by(name) %>%
+  slice(1) %>%
+  column_to_rownames("name")
+```
+
+```{r}
+all(colnames(abun_mOTU) %in% rownames(taxa_mOTU_clean))
+all(rownames(abun_mOTU) %in% rownames(info_sample))
+```
+
+```{r}
+# Example usage where you iterate over each element of species_gtdb and compare it to all of uhgg$SPECIES
+dict_ncbi_gtbtk <- dict_ncbi_gtbtk %>%
+  mutate(
+    human_gut = map_chr(species_gtdb, ~ {
+      matching_species <- uhgg$SPECIES[str_detect(.x, fixed(uhgg$SPECIES))]
+      if (length(matching_species) > 0) {
+        return(matching_species[1])  # Return the first match if found
+      } else {
+        return(NA_character_)  # Return NA if no match
+      }
+    })
+  )
+
+taxa_mOTU_clean <- taxa_mOTU_clean %>%
+  rownames_to_column("taxa_id") %>%
+  left_join(dict_ncbi_gtbtk, by = join_by(taxa_id == mOTU_ncbi_name)) %>%
+  mutate(is_from_gut = if_else(is.na(human_gut), FALSE, TRUE)) %>%
+  group_by(taxa_id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  column_to_rownames("taxa_id")
+```
+
+
+
+```{r}
+# SAMPLE INTERSECTION
+#------------------------------------------------------------------------------#
+sample_intersection <- purrr::reduce(
+  .x = list(rownames(abun_amr), rownames(info_sample), rownames(abun_mOTU)),
+  .f = intersect
+)
+```
+
+
+```{r}
+# SELECT THE INTERSECTION
+# From 1240 to 1147 (fair enough)
+#------------------------------------------------------------------------------#
+abun_amr <- abun_amr[sample_intersection, ]
+abun_mOTU <- abun_mOTU[sample_intersection, ]
+info_sample <- info_sample[sample_intersection,]
+```
+
+```{r}
+# MERGE TAXA AND COUNT INFORMATION IN AMR
+#------------------------------------------------------------------------------#
+all(colnames(abun_amr) %in% rownames(taxa_amr_clean))
+taxa_amr_clean <- taxa_amr_clean[colnames(abun_amr), , drop = F]
+```
+
+```{r}
+all(colnames(abun_mOTU) %in% rownames(taxa_mOTU_clean) )
+taxa_mOTU_clean <- taxa_mOTU_clean[colnames(abun_mOTU), ]
+```
+
+
+```{r}
+library(mgnet)
+
+
+mOTU <- mgnet(
+  abun = abun_mOTU,
+  meta = info_sample,
+  taxa = taxa_mOTU_clean
+)
+
+amr <- mgnet(
+  abun = abun_amr,
+  meta = info_sample,
+  taxa = taxa_amr_clean
+)
+```
+
+
+```{r}
+saveRDS(mOTU, "R/mOTU.rds")
+saveRDS(amr, "R/mOTU.rds")
+```
+
+
+
+
+
+

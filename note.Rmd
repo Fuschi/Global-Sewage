@@ -1,0 +1,671 @@
+---
+title: "Analysis of Global Sewage for Bacterial and Antimicrobial Resistance Genes"
+output: html_notebook
+---
+
+This notebook explores a dataset containing information on bacterial profiles and antimicrobial resistance genes (ARGs) from global sewage samples. The aim is to identify prevalent bacterial families and assess the distribution and resistance patterns among them.
+
+### Load Libraries and Read Data
+
+```{r}
+# Uncomment the following line to install the 'mgnet' package directly from GitHub if not previously installed
+#devtools::install_github("Fuschi/mgnet")
+```
+
+```{r}
+library(tidyverse)
+library(mgnet)
+```
+
+```{r}
+gs <- readRDS("../data/R/global-sewage-mOTUs-amr.rds")
+#gs <- readRDS("../data/R/global-sewage-genera-amr.rds")
+gs # Display the structure and a brief overview of the dataset
+```
+
+### Taxa Distribution
+
+I conduct an exploration of the distribution of microbial taxa of genus AMR genes. 
+The study aims to identify and remove rare taxa that could potentially introduce noise into the dataset. I employ measures of taxa prevalence, sum of abundances, and maximum relative abundance. 
+
+```{r, fig.height=9}
+gs <- gs %>%
+  mutate_taxa(
+    m_prevalence = sum(abun>0)/length(abun),
+    m_log10_sum_taxa = log10(sum(abun)),
+    m_log10_max_rel = log10(max(rela))) 
+
+gather_taxa(gs) %>%
+  pivot_longer(cols = starts_with("m_"),
+               names_to = "measures", values_to = "values") %>%
+  ggplot(aes(x = values)) +
+  geom_histogram(fill = "lightblue", color = "darkblue", bins = 20) +
+  facet_wrap(~ measures + source, scales = "free", nrow = 3) +
+  theme_bw() +
+  theme(axis.text = element_text(size = 12),
+        strip.text = element_text(size = 12))
+```
+
+```{r}
+gs <- gs %>%
+  split_taxa(source) %>%
+  mutate_meta(
+    sum_sample_origin = sum(abun)) %>%
+  mutate_taxa(
+    m_prevalence_pass = m_prevalence >= .25,
+    m_sum_taxa_pass = case_when(source == "mOTU" ~ m_log10_sum_taxa >= 2,
+                              source == "amr" ~ m_log10_sum_taxa >= -1),
+    m_max_rel_pass = case_when(source == "mOTU" ~ m_log10_max_rel >= -1,
+                             source == "amr" ~ m_log10_max_rel >= -4)) %>%
+  filter_taxa(m_prevalence_pass & m_sum_taxa_pass | m_max_rel_pass) %>%
+  mutate_meta(
+    lost_count = sum(abun) / sum_sample_origin)
+```
+
+```{r, fig.width=5, fig.height=3}
+gs %>%
+  gather_meta() %>%
+  select(lost_count, mgnet) %>%
+  ggplot(aes(x = lost_count, fill = mgnet)) +
+  geom_histogram(position = "dodge", color = "gray", binwidth = .025) +
+  labs(fill = "source") +
+  theme_bw()
+```
+
+```{r}
+gs_source_filt <- gs %>%
+  set_norm_CLR()
+```
+
+```{r}
+merge_mgnet <- function(x, y){
+  mgnet(norm = cbind(norm(x), norm(y)),
+        meta = meta(x),
+        taxa = bind_rows(taxa(x), taxa(y)))
+}
+
+gs_netw <- mgnetList(
+  "mOTU-ResFinder" = merge_mgnet(gs_source_filt$mOTU,
+                                 filter_taxa(gs_source_filt$amr, amr_group == "Resfinder")),
+  "mOTU-Functional" = merge_mgnet(gs_source_filt$mOTU,
+                                  filter_taxa(gs_source_filt$amr, amr_group == "Functional"))
+) %>%
+  constructCorrCLRNet(cor_method = "spearman",
+                      thresh_method = "absolute", thresh_value = .6, cores = 6) %>%
+  cluster_signed(cores = 6)
+```
+
+```{r}
+gs_netw_filt <- gs_netw %>%
+  filter_taxa(n() > 1, .by = c("mgnet","comm_id")) 
+
+map(gs_netw_filt, \(x) sizes(comm(x)))
+
+gs_netw_filt <- gs_netw %>%
+  filter_taxa(n() >= 5, .by = c("mgnet", "comm_id"))
+```
+
+## Plots
+
+### Colors
+
+```{r}
+colormap_family <- pull_taxa(gs_netw_filt, "family") %>%
+  unlist() %>% table %>% sort(decreasing = T) %>% names %>%
+  colormap_categories(distinct_colors = 40)
+colormap_family <- colormap_family[colormap_family != "#FFFFFFFF"]
+colormap_family <- setNames(adjustcolor(colormap_family, .75), names(colormap_family))
+
+colormap_class_amr <- pull_taxa(gs_netw_filt, amr_class) %>%
+  unlist() %>% table %>% sort(decreasing = T) %>% names %>%
+  colormap_categories()
+
+colormap_comms <- colormap_communities(comm(gs_netw_filt), 5, colorspace = "pretty_dark")
+#colormap_class_amr <- colormap_class_amr[colormap_class_amr != "#FFFFFFFF"]
+
+gs_netw_filt <- gs_netw_filt %>%
+  mutate_taxa(vertex_color_family_classAMR = case_when(
+    source == "mOTU" ~ colormap_family[family],
+    source == "amr" ~ colormap_class_amr[amr_class],
+  )) 
+```
+
+```{r}
+#################################################################
+# generic star vertex shape, with a parameter for number of rays
+mystar <- function(coords, v=NULL, params) {
+  vertex.color <- params("vertex", "color")
+  if (length(vertex.color) != 1 && !is.null(v)) {
+    vertex.color <- vertex.color[v]
+  }
+  vertex.size  <- 1/200 * params("vertex", "size")
+  if (length(vertex.size) != 1 && !is.null(v)) {
+    vertex.size <- vertex.size[v]
+  }
+  vertex.frame.color <- params("vertex", "frame.color")
+  if (length(vertex.frame.color) != 1 && !is.null(v)) {
+    vertex.frame.color <- vertex.frame.color[v]
+  }
+  vertex.frame.width <- params("vertex", "frame.width")
+  if (length(vertex.frame.width) != 1 && !is.null(v)) {
+    vertex.frame.width <- vertex.frame.width[v]
+  }
+  norays <- params("vertex", "norays")
+  if (length(norays) != 1 && !is.null(v)) {
+    norays <- norays[v]
+  }
+
+  mapply(coords[,1], coords[,2], vertex.color, 
+         vertex.frame.color, vertex.frame.width,
+         vertex.size, norays,
+         FUN=function(x, y, bg, fg, lwd, size, nor) {
+           symbols(x=x, y=y, bg=bg, fg=fg, lwd=lwd,
+                   stars=matrix(c(size,size/2), nrow=1, ncol=nor*2),
+                   add=TRUE, inches=FALSE)
+         })
+}
+# no clipping, edges will be below the vertices anyway
+add_shape("star", clip=shape_noclip,
+                 plot=mystar, parameters=list(vertex.norays=5))
+```
+
+## All networks toghter
+
+```{r, fig.width=18, fig.height=12}
+png("../plots/all.png", width = 5400, height = 3600, res = 300)
+
+# Layout Of Final Image
+#------------------------------------------------------------------------------#
+layout(mat = matrix(1:8, ncol = 4, byrow = T), widths = c(1/2,1,1,1/2))
+
+# First legend with bacterial families
+#------------------------------------------------------------------------------#
+plot.new()
+par(mar=c(0,0,0,0))
+legend(x = .5, y = 1, xjust = .5, yjust = 1,
+       legend = names(colormap_family), fill = colormap_family, title = "mOTU family", 
+       ncol = 1, bty = "n")
+
+
+# Network Resfinder Families/AMR-Class
+#------------------------------------------------------------------------------#
+x <- gs_netw_filt$`mOTU-ResFinder`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     posCol = rgb(0, 0, 1, .5), negCol = rgb(1, 0, 0, .5),
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = pull_taxa(x, "vertex_color_family_classAMR"),
+     vertex.frame.width = 3,
+     vertex.frame.color = colormap_comms$`mOTU-ResFinder`[comm_id(x)])
+mtext("a", side = 3, line = -4, adj = 0.1, cex = 2) 
+
+# Network Functional Families/AMR-Class
+#------------------------------------------------------------------------------#
+x <- gs_netw_filt$`mOTU-Functional`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     posCol = rgb(0, 0, 1, .5), negCol = rgb(1, 0, 0, .5),
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = pull_taxa(x, "vertex_color_family_classAMR"),
+     vertex.frame.width = ifelse(pull_taxa(x, "source") == "mOTU", .2, 1))
+mtext("b", side = 3, line = -4, adj = .9, cex = 2) 
+
+# Second legend with amr classes
+#------------------------------------------------------------------------------#
+plot.new()
+par(mar=c(0,0,0,0))
+names_class <- names(colormap_class_amr) %>%
+  str_remove_all("\\[") %>% str_remove_all("\\]") %>% str_remove_all("'") 
+names_class[names_class == "lincosamide, oxazolidinone, phenicol, pleuromutilin, streptogramin_a"] <- 
+  "lincosamide, oxazolidinone, phenicol,\npleuromutilin, streptogramin_a"
+y.space <- rep(.25,28)
+y.space[25] <- 2
+
+legend(x = .5, y = .95, xjust = .5, yjust = 1,
+       legend = names_class, fill = colormap_class_amr, title = "amr class",
+       ncol = 1, bty = "n", y.intersp = y.space)
+
+legend(x = .5, y = .2, xjust = .5, yjust = 1,
+       legend = c("mOTU", "amr"), pch=c(21, 8), 
+       pt.bg=c('white', NA), col=c('black', 'black'),
+       title="Source",
+       bty = "n", cex = 1, pt.cex = 2, title.cex = 1)
+
+# Third Legend Communities of Resfinder communities
+#------------------------------------------------------------------------------#
+plot.new()
+par(mar=c(0,0,0,0))
+
+legend(x = .5, y = .95, xjust = .5, yjust = 1,
+       legend = names(colormap_comms$`mOTU-ResFinder`), fill = colormap_comms$`mOTU-ResFinder`, title = "communities",
+       ncol = 1, bty = "n")
+
+# Gut resfinder
+#------------------------------------------------------------------------------#
+x <- gs_netw_filt$`mOTU-ResFinder`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     posCol = rgb(0, 0, 1, .5), negCol = rgb(1, 0, 0, .5),
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "triangle"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = if_else(pull_taxa(x,is_from_gut), "brown", "lemonchiffon"),
+     vertex.frame.color = colormap_comms$`mOTU-ResFinder`[comm_id(x)],
+     vertex.frame.width = 3)
+mtext("c", side = 3, line = -4, adj = 0.1, cex = 2)
+
+# Gut Functional
+#------------------------------------------------------------------------------#
+x <- gs_netw_filt$`mOTU-Functional`
+set.seed(42)
+layout_x <- layout_with_fr(subgraph.edges(netw(x), which(E(netw(x))$weight>0)), 
+                           niter = 1000, start.temp = .2)
+par(mar=c(0,0,0,0))
+plot(x,
+     layout = layout_x,
+     vertex.label = NA,
+     posCol = rgb(0, 0, 1, .5), negCol = rgb(1, 0, 0, .5),
+     vertex.shape = ifelse(taxa(x)$source == "mOTU", "circle", "star"),
+     vertex.size = colMeans(norm(x)) + 3,
+     vertex.color = if_else(pull_taxa(x,is_from_gut), "brown", "lemonchiffon"),
+     vertex.frame.color = colormap_comms$`mOTU-Functional`[comm_id(x)],
+     vertex.frame.width = 3)
+mtext("d", side = 3, line = -4, adj = .9, cex = 2) 
+
+# Fourth Legend Communities of Functional communities
+#------------------------------------------------------------------------------#
+plot.new()
+par(mar=c(0,0,0,0))
+
+legend(x = .5, y = .95, xjust = .5, yjust = 1,
+       legend = names(colormap_comms$`mOTU-Functional`), col = colormap_comms$`mOTU-Functional`, 
+       title = "communities",
+       ncol = 1, bty = "n", pch = 1, pt.lwd = 4, bg = "lightgray")
+
+dev.off()
+```
+
+
+## Write Tables
+
+```{r}
+for(mg in names(gs_netw)){
+  gs_netw[[mg]]@taxa <- cbind(gs_netw[[mg]]@taxa,
+                                    "degree_intra_positve" = degree_mgnet(gs_netw[[mg]],
+                                                                          "positive", "intra"),
+                                    "degree_intra_negative" = degree_mgnet(gs_netw[[mg]],
+                                                                          "negative", "intra"),
+                                    "degree_extra_positve" = degree_mgnet(gs_netw[[mg]],
+                                                                          "positive", "extra"),
+                                    "degree_extra_negative" = degree_mgnet(gs_netw[[mg]],
+                                                                          "negative", "extra"))
+}
+
+gs_netw_info <- gs_netw %>%
+  filter_taxa(n() > 1, .by = c("mgnet","comm_id")) %>%
+  mutate_taxa(comm_size = n(), .by = c("mgnet", "comm_id")) 
+
+info_nodes <- gs_netw_info %>%
+  gather_taxa() %>%
+  select(-starts_with("m_"))
+
+```
+
+```{r}
+summary_edges <- map(gs_netw, \(x) {
+  df <- igraph::as_data_frame(netw(x))
+  df <- cbind(df, "crossing_comm" = igraph::crossing(comm(x), netw(x)))
+  }) %>%
+  imap(\(x,y) mutate(x, "mgnet" = y, .before = 1)) %>%
+  bind_rows() %>%
+  mutate(
+    new_from = if_else(str_starts(from, "pan_"), to, from),
+    new_to = if_else(str_starts(from, "pan_"), from, to)
+  ) %>%
+  select(-mgnet, -from, -to, from = new_from, to = new_to) %>%
+  left_join(gather_taxa(gs)[, c("taxa_id","type", "genus", "family")], 
+            by = join_by(from == taxa_id)) %>%
+  rename(type_from = type, genus_from = genus, family_from = family) %>%
+  left_join(gather_taxa(gs)[, c("taxa_id","type", "amr_class")],
+            by = join_by(to == taxa_id)) %>%
+  rename(type_to = type, amr_class_to = amr_class) %>%
+  unite("type", type_from, type_to, sep = "-", remove = FALSE) 
+
+
+summary_edges_filt <- summary_edges %>%
+  filter(weight>0) %>%
+  filter(type %in% c("mOTU-Functional","mOTU-Resfinder")) %>% 
+  mutate(genus_from = if_else(is.na(genus_from), "Unknown", genus_from),
+         family_from = if_else(is.na(family_from), "Unknown", family_from)) %>%
+  select(type, crossing_comm, from, to, weight, genus_from, family_from, type_to, amr_class_to) %>%
+  rename(genus = from, amr = to, 
+         genus_mOTU = genus_from, family_mOTU = family_from,
+         type_amr = type_to, class_amr = amr_class_to)
+```
+
+
+```{r}
+write_tsv(info_nodes, "../tables/info_nodes.tsv")
+write_tsv(summary_edges, "../tables/info_edges_all.tsv")
+write_tsv(summary_edges_filt, "../tables/info_edges_only_mOTU_AMR.tsv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Bench
+
+```{r}
+degree_genus <- summary_edges_filt %>%
+  group_by(type, genus) %>%
+  summarise(degree = n(), .groups = "drop")
+
+degree_amr <- summary_edges_filt %>%
+  group_by(type, amr) %>%
+  summarise(degree = n(), .groups = "drop")
+
+top_amr_fun <- degree_amr %>%
+  filter(type == "mOTU-Functional", degree >= 30) 
+
+top_amr_res <- degree_amr %>%
+  filter(type == "mOTU-ResFinder", degree >= 5) 
+```
+
+```{r}
+for(mg in names(gs_netw_filt)){
+  gs_netw_filt[[mg]]@taxa <- cbind(taxa(gs_netw_filt[[mg]]),
+                                    "degree_intra_positve" = degree_mgnet(gs_netw_filt[[mg]],
+                                                                          "positive", "intra"),
+                                    "degree_intra_negative" = degree_mgnet(gs_netw_filt[[mg]],
+                                                                          "negative", "intra"),
+                                    "degree_extra_positve" = degree_mgnet(gs_netw_filt[[mg]],
+                                                                          "positive", "extra"),
+                                    "degree_extra_negative" = degree_mgnet(gs_netw_filt[[mg]],
+                                                                          "negative", "extra"))
+}
+
+gather_taxa(gs_netw_filt) %>%
+  select(-prevalence,-log10_sum_taxa,-log10_max_rel,
+         -prevalence_pass,-sum_taxa_pass,-max_rel_pass) %>%
+  write_tsv("../tables/info_nodes.tsv")
+  
+summary_edges %>%
+  write_tsv("../tables/info_edges_all.tsv")
+
+summary_edges_filt %>%
+  write_tsv("../tables/info_edges_only_genus_AMR.tsv")
+```
+
+
+```{r}
+set.seed(42)
+reticulate::use_condaenv("pacmap", required = TRUE)
+pacmap <- reticulate::import("pacmap")
+reducer <- pacmap$PaCMAP()
+embedding <- reducer$fit_transform(norm(gs_source_filt$mOTU))
+```
+
+```{r}
+df <- as_tibble(embedding) %>%
+  bind_cols(meta(gs_source_filt$mOTU, "tbl"))
+df
+```
+
+```{r, fig.width=10, fig.height=12}
+library(RColorBrewer)
+library(ggpubr)
+
+df <- df %>%
+  group_by(country_alt) %>%
+  mutate(n_country = n()) %>%
+  ungroup() %>%
+  mutate(country = factor(country_alt),
+         country = fct_reorder(country, n_country),
+         country = fct_lump(country, n=20))
+
+palette_country <- qualpalr::qualpal(length(unique(df$country)))
+palette_country <- rownames(palette_country$RGB)
+names(palette_country) <- unique(df$country)
+palette_country[names(palette_country) == "Other"] <- "#FFFFFFFF"
+
+ggarrange(
+  
+  df %>%
+  ggplot(aes(x=V1, y=V2, col = lat)) +
+  geom_point(size = 2) +
+  theme_bw() +
+  theme(axis.title = element_blank()) +
+  scale_color_distiller(palette = "Spectral"),
+  
+  df %>%
+  ggplot(aes(x=V1, y=V2, col = lon)) +
+  geom_point(size = 2) +
+  theme_bw() +
+  theme(axis.title = element_blank()) +
+  scale_color_distiller(palette = "Spectral"),
+  
+  df %>%
+  ggplot(aes(x=V1, y=V2, col = Region)) +
+  geom_point(size = 2) +
+  theme_bw() +
+  theme(axis.title = element_blank()) +
+  guides(col = guide_legend(nrow = 5)),
+  
+  df %>%
+  ggplot(aes(x=V1, y=V2, col = country)) +
+  geom_point(size = 2) +
+  theme_bw() +
+  theme(axis.title = element_blank()) +
+  scale_color_manual(values = palette_country),
+  
+  common.legend = FALSE, labels = c("lat", "lon", "region"), legend = "bottom", ncol =2, nrow = 2, heights = c(.4,.6)
+)
+
+
+```
+
+```{r}
+embedding_amr <- reducer$fit_transform(norm(gs_source_filt$amr))
+df_amr <- as_tibble(embedding_amr) %>%
+  bind_cols(meta(gs_source_filt$amr, "tbl"))
+df_amr
+```
+
+```{r}
+ggarrange(
+  
+  df_amr %>%
+  ggplot(aes(x=V1, y=V2, col = lat)) +
+  geom_point() +
+  theme_bw() +
+  theme(axis.title = element_blank()) +
+  scale_color_distiller(palette = "Spectral"),
+  
+  df_amr %>%
+  ggplot(aes(x=V1, y=V2, col = lon)) +
+  geom_point() +
+  theme_bw() +
+  theme(axis.title = element_blank()) +
+  scale_color_distiller(palette = "Spectral"),
+  
+  common.legend = TRUE, labels = c("lat", "lon")
+)
+```
+
+
+
+
+
+```{r}
+gs_netw_filt <- gs_netw_filt %>%
+  mutate_taxa(family = if_else(is.na(family) && source == "mOTU", "Unknown", family)) %>%
+  mutate_taxa(n_family = n(), .by = c("mgnet", "family")) %>%
+  mutate_taxa(fct_family = fct_reorder(family, n_family, .desc = TRUE),
+              fct_family = fct_lump(fct_family, 30),
+              fct_amr_class = factor(amr_class),
+              .by = "mgnet") %>%
+  colorize_taxa(fct_family, colorspace = "pretty", alpha = .7) %>%
+  mutate_taxa(color_fct_family = if_else(fct_family == "Other", "#E0E0E0", color_fct_family)) %>%
+  colorize_taxa(fct_amr_class) %>%
+  mutate_taxa(size = mean(norm) + 2)
+
+gs_netw_filt <- gs_netw_filt %>%
+  unite_taxa(col = "mgnet_comm", mgnet, comm_id) %>%
+  mutate_taxa(mgnet_comm = factor(mgnet_comm)) %>%
+  colorize_taxa(mgnet_comm, colorspace = "pretty_dark") 
+  #mutate_taxa(color_mgnet_comm = if_else(comm_id %in% as.character(1:9), color_mgnet_comm, NA))
+```
+
+
+
+```{r, fig.width=6, fig.height=10}
+library(ggraph)
+library(ggnewscale)
+library(ggforce)
+
+plot_graph <- function(mg){
+  
+  g <- netw(mg, add_vertex_attr = TRUE)
+  E(g)$sign <- if_else(E(g)$weight>0, "positive", "negative")
+  
+  g_bac <- induced_subgraph(g, vids = V(g)$source == "mOTU")
+  g_amr <- induced_subgraph(g, vids = V(g)$source == "amr")
+  
+  set.seed(42)
+  layout_g <- layout_signed(g, with_fr(start.temp = .1))
+  
+  df_layout <-  tibble(x = layout_g[,1], y = layout_g[,2],
+                       comm_id = comm_id(mg),
+                       comm_col = pull_taxa(mg, color_mgnet_comm))
+  
+  p <- ggraph(g, layout = layout_g) +
+    # base nodes
+    # geom_node_point(aes(size = size, shape = type), color = "black") +
+    # scale_shape_manual(values = c(21, 23)) +
+    # new_scale_fill() +
+    # communities
+    geom_mark_hull(data = df_layout, aes(x = x, y = y, color = comm_id), linewidth = 1, fill = NA,
+                   expand = 0.0125, show.legend = FALSE, concavity = 1) +
+    scale_color_manual(values = adjustcolor(df_layout$comm_col, 1), breaks = df_layout$comm_id) +
+    # links
+    geom_edge_link(aes(color = sign), linewidth = .5) +
+    scale_edge_color_manual(name="Correlation Sign",
+                            values=c("positive" = rgb(0,0,1,.25),
+                                     "negative" = rgb(1,0,0,.25))) +
+    # First color scale for mOTU
+    new_scale_fill() +
+    geom_node_point(aes(filter = source == "mOTU", fill = fct_family, size = size), shape = 21, stroke = 0.5) +
+    scale_fill_manual(values = V(g_bac)$color_fct_family, breaks = V(g_bac)$fct_family) +
+    # Second color scale for amr
+    new_scale_fill() +
+    geom_node_point(aes(filter = source == "amr", fill = fct_amr_class, size = size), shape = 24, stroke = 1.25) +
+    scale_fill_manual(values = V(g_amr)$color_fct_amr_class, breaks = V(g_amr)$fct_amr_class) +
+    theme_graph()
+  
+  return(p)
+}
+```
+
+```{r, fig.width=10, fig.height=10}
+png(filename = "test.png", width = 3000, height = 3000, res = 300)
+gs_netw_filt$`mOTU-Functional` %>%
+  plot_graph() + 
+  theme(legend.position = "none")
+```
+
+
+```{r, fig.height=10, fig.width=4}
+png("../plots/Gene-Connected-Functional.png", width = 1200, height = 3000, res = 300)
+summary_edges_filt %>%
+  filter(type == "mOTU-Functional" & amr %in% top_amr_fun$amr) %>%
+  select(amr, family_mOTU) %>%
+  group_by(amr, family_mOTU) %>%
+  summarise(`edge number` = n(), .groups = "drop") %>%
+  arrange(desc(`edge number`)) %>%
+  mutate(amr = fct_reorder(amr, `edge number`, .fun = sum, .desc = TRUE)) %>%
+  ggplot(aes(x = amr, y = `edge number`, fill = family_mOTU)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = colormap_family) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5)) +
+  theme(legend.position = "none") +
+  ggtitle("Top Gene-Connected Families by AMR") +
+  coord_flip() +
+  ylim(0,95) +
+  theme(title = element_text(size = 10),
+        axis.title.y = element_blank()) 
+dev.off()
+```
+
+```{r, fig.height=10, fig.width=4}
+png("../plots/Gene-Connected-ResFinder.png", width = 1200, height = 3000, res = 300)
+summary_edges_filt %>%
+  filter(type == "genus-ResFinder" & amr %in% top_amr_res$amr) %>%
+  select(amr, family_genus) %>%
+  group_by(amr, family_genus) %>%
+  summarise(`edge number` = n(), .groups = "drop") %>%
+  arrange(desc(`edge number`)) %>%
+  mutate(amr = fct_reorder(amr, `edge number`, .fun = sum, .desc = TRUE)) %>%
+  ggplot(aes(x = amr, y = `edge number`, fill = family_genus)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = colormap_family) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5)) +
+  theme(legend.position = "none") +
+  ggtitle("Top Gene-Connected Families by AMR") +
+  coord_flip() +
+  ylim(0,95) +
+  theme(title = element_text(size = 10),
+        axis.title.y = element_blank()) 
+dev.off()
+```
