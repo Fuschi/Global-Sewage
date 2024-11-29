@@ -9,7 +9,6 @@ library(tidyverse)
 
 
 ```{r, message=FALSE, warning=FALSE}
-
 abun_mOTU <- read_csv("RAW/mOTU_motus_pad_agg_counts.csv", name_repair = "minimal")
 taxa_mOTU <- read_csv("RAW/mOTU_motus_pad_agg_taxa_paths.csv", name_repair = "minimal")
 
@@ -149,7 +148,7 @@ taxa_mOTU <- read_csv("RAW/mOTU_motus_pad_agg_taxa_paths.csv") %>%
 
 
 ```{r, message=FALSE}
-abun_mOTU <- read_csv("mOTU/mOTU_motus_pad_agg_counts.csv") %>%
+abun_mOTU <-  abun_mOTU %>%
   column_to_rownames("genepid") %>%
   as.matrix()
 ```
@@ -224,9 +223,10 @@ taxa_mOTU_clean <- taxa_mOTU_clean[colnames(abun_mOTU), ]
 ```
 
 
-```{r}
+```{r, message=FALSE}
 library(mgnet)
 
+abun_mOTU[abun_mOTU == Inf] <- 0
 
 mOTU <- mgnet(
   abun = abun_mOTU,
@@ -241,10 +241,28 @@ amr <- mgnet(
 )
 ```
 
+```{r}
+taxa(mOTU) <- taxa(mOTU) %>%
+  relocate(ends_with("_ncbi"), .before=1) %>%
+  select(-ends_with("_id")) %>%
+  select(-level) %>%
+  mutate(source = "mOTU", type = "mTOU",.before = 1) %>%
+  rename(species_uhgg = human_gut)
+
+taxa(mOTU, "tbl")
+```
+
+```{r}
+taxa(amr) <- taxa(amr) %>%
+  rename(class_amr = amr_class, database_amr = amr_database, type = amr_group) %>%
+  relocate(type, .after = source) %>%
+  mutate(type = if_else(type == "Functional", "functional", "acquired"))
+```
+
 
 ```{r}
 saveRDS(mOTU, "R/mOTU.rds")
-saveRDS(amr, "R/mOTU.rds")
+saveRDS(amr, "R/amr.rds")
 ```
 
 
