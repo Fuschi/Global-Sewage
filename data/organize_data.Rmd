@@ -246,7 +246,7 @@ taxa(mOTU) <- taxa(mOTU) %>%
   relocate(ends_with("_ncbi"), .before=1) %>%
   select(-ends_with("_id")) %>%
   select(-level) %>%
-  mutate(source = "mOTU", type = "mTOU",.before = 1) %>%
+  mutate(source = "mOTU", type = "mOTU",.before = 1) %>%
   rename(species_uhgg = human_gut)
 
 taxa(mOTU, "tbl")
@@ -258,6 +258,25 @@ taxa(amr) <- taxa(amr) %>%
   relocate(type, .after = source) %>%
   mutate(type = if_else(type == "Functional", "functional", "acquired"))
 ```
+
+```{r, message=FALSE}
+gene_names <- read_csv("RAW/gene_fa_names.csv") %>%
+  pivot_longer(-c(cluster_representative_98, name), names_to = "db", values_to = "fa_name") %>%
+  filter(!is.na(fa_name)) %>%
+  select(-fa_name) %>%
+  mutate(db_priority = factor(db, levels = c("resfinder", "functional_amr", "csabapal"), ordered = TRUE)) %>%
+  group_by(cluster_representative_98) %>%
+  filter(db_priority == max(db_priority)) %>%
+  ungroup() %>%
+  select(-db_priority) %>%
+  distinct() %>%
+  select(-db) %>%
+  rename(name_extracted_amr = name)
+
+taxa(amr) <- gather_taxa(amr) %>%
+  left_join(gene_names, by = join_by(taxa_id == cluster_representative_98))
+```
+
 
 
 ```{r}
