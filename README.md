@@ -6,7 +6,7 @@ This repository contains a network analysis of Antimicrobial Resistance Genes (A
 
 The project is organized into the following folders:
 
-- **analysis**: This directory contains the notebook that you can use to reproduce the analyses presented in the project.
+- **notebooks**: This directory contains the notebook that you can use to reproduce the analyses presented in the project.
 - **data**: Here, you will find the organized database saved in R format. Due to space limitations, the raw data files are not included in this repository. The metadata on antimicrobial resistance (AMR) could be better organized and may need a thorough review.
 - **plots**: All generated plots from the analyses are saved here.
 - **tables**: This folder contains summary tables that summarize the network data.
@@ -16,6 +16,5 @@ The project is organized into the following folders:
 To run the code and reproduce the analyses, you will need the **mgnet** package installed: -  (currently in development but soon to be released)  
 
 ```
-library("devtools")
-install_github("Fuschi/mgnet", ref = "3c26e21969b6d92eaa371e44111f8233647bb8c4")
+devtools::install_github("Fuschi/mgnet", ref = "v0.3-beta")
 ```
