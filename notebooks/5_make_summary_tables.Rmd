@@ -3,7 +3,7 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-```{r}
+```{r, message=FALSE}
 library(tidyverse)
 library(mgnet)
 ```
@@ -26,7 +26,8 @@ mg <- mg %>%
   select_link(weight > 0) %>%
   mutate_netw(eigen = eigen_centrality(netw)$vector) %>%
   select_link(weight > 0) %>%
-  mutate_netw(eigen_comm = eigen_centrality(netw)$vector, group_taxa = "comm_id")   
+  mutate_netw(eigen_comm = eigen_centrality(netw)$vector, group_taxa = "comm_id") %>%
+  deselect_link()
 ```
 
 ```{r}
