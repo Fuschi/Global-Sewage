@@ -287,5 +287,91 @@ saveRDS(amr, "R/amr.rds")
 
 
 
+## ADD Some Info to mOTU
 
+```{r}
+library(BacDive)
+library(taxizedb)
+library(mgnet)
+```
+
+```{r}
+mOTU <- readRDS("R/mOTU.rds")
+```
+
+```{r}
+mOTU_classified <- mOTU %>%
+  filter_taxa(!str_detect(taxa_id, "ext_mOTU"))
+
+bacdive <- BacDive::open_bacdive("alessandro.fuschi.work@gmail.com", "1Abexodus1")
+df <- tibble(name = taxa_id(mOTU_classified)) 
+
+df$id <- sapply(df$name, \(x){
+    result <- BacDive::request(object = bacdive, query = x)$result
+    if(length(result)){
+      return(result[[1]])
+    } else {
+      return(NA)
+    }
+  })
+saveRDS(df, "BacDiveInfo.rds")
+```
+
+```{r}
+df <- readRDS("BacDiveInfo.rds")
+bacdive <- BacDive::open_bacdive("alessandro.fuschi.work@gmail.com", "1Abexodus1")
+```
+
+```{r}
+df <- df[!is.na(df$id), ]
+res <- lapply(df$id, \(x) BacDive::fetch(bacdive, x))
+
+# Function to extract Gram status from each record
+extract_gram_status <- function(record) {
+  tryCatch(
+    {
+      if (!is.null(record$Morphology)) {
+        gram_status <- record$Morphology$`cell morphology`$`gram stain`
+        if (!is.null(gram_status)) {
+          return(gram_status)
+        }
+      }
+      return(NA)  # Return NA if no Gram status is found
+    },
+    error = function(e) NA  # Handle errors gracefully
+  )
+}
+
+# Apply the function to the list
+gram_statuses <- lapply(res, function(entry) {
+  if (!is.null(entry$results)) {
+    lapply(entry$results, extract_gram_status)
+  } else {
+    return(NA)
+  }
+})
+```
+
+```{r}
+# Flatten the nested lists
+flattened_gram_statuses <- unlist(gram_statuses)
+flattened_gram_statuses <- flattened_gram_statuses[!is.na(flattened_gram_statuses)]
+flattened_gram_statuses_2 <- enframe(flattened_gram_statuses, value = "gram_status") %>%
+  separate(name, c("name", "id"), sep = "\\.") %>%
+  mutate(id = as.integer(id))
+# View the results
+print(flattened_gram_statuses)
+
+
+df2 <- df %>%
+  left_join(flattened_gram_statuses_2) %>%
+  select(name, gram_status)
+
+mOTU <- readRDS("R/mOTU.rds")
+taxa(mOTU) <- gather_taxa(mOTU) %>%
+  left_join(df2, join_by(taxa_id == name))
+
+
+saveRDS(mOTU, "R/mOTU.rds")
+```
 

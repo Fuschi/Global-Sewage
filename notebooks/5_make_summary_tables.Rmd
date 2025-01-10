@@ -25,9 +25,9 @@ mg <- mg %>%
   mutate_netw(degree_neg_extra = degree(netw)) %>%
   select_link(weight > 0) %>%
   mutate_netw(eigen = eigen_centrality(netw)$vector) %>%
-  select_link(weight > 0) %>%
   mutate_netw(eigen_comm = eigen_centrality(netw)$vector, group_taxa = "comm_id") %>%
-  deselect_link()
+  deselect_link() %>%
+  mutate_taxa(clrMean = mean(norm))
 ```
 
 ```{r}
@@ -37,9 +37,9 @@ mg <- mg %>%
       both(type == "mOTU") ~ "mOTU-mOTU",
       one(type == "mOTU") & one(type == "acquired") ~ "mOTU-acquired",
       one(type == "mOTU") & one(type == "functional") ~ "mOTU-functional",
+      one(type == "acquired") & one(type == "functional") ~ "acquired-functional",
       both(type == "acquired") ~ "acquired-acquired",
-      both(type == "functional") ~ "functional-functional",
-      both(type == "acquired-functional") ~ "acquired-functional"
+      both(type == "functional") ~ "functional-functional"
     ))
 ```
 
