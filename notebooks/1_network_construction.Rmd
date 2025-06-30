@@ -15,6 +15,42 @@ amr <- readRDS("../data/R/amr.rds") %>%
   filter_taxa(sum(abun) != 0)
 ```
 
+```{r}
+filt_stats <- tibble(
+  prevalence = numeric(),
+  lost_counts_amr = numeric(),
+  lost_counts_mOTU = numeric(),
+  ntaxa_amr = numeric(),
+  ntaxa_mOTU = numeric()
+)
+
+sample_sum_amr <- rowSums(abun(amr))
+sample_sum_mOTU <- rowSums(abun(mOTU))
+
+for(p in seq(0, 1, .01)){
+
+  mOTU_filt <- abun(mOTU)[, colSums(abun(mOTU)>0) / nsample(mOTU) >= p]
+  amr_filt <- abun(amr)[, colSums(abun(amr)>0) / nsample(amr) >= p]
+  
+  filt_stats <- filt_stats %>%
+    bind_rows(tibble(
+      prevalence = p,
+      preserved_counts_amr = mean(rowSums(amr_filt) / sample_sum_amr),
+      preserved_counts_mOTU = mean(rowSums(mOTU_filt) / sample_sum_mOTU),
+      ntaxa_amr = ncol(amr_filt) / ntaxa(amr),
+      ntaxa_mOTU = ncol(mOTU_filt) / ntaxa(mOTU)
+    ))
+}
+```
+
+```{r}
+filt_stats %>%
+  ggplot(aes(x = prevalence)) + 
+  geom_point(aes(y = preserved_counts_mOTU), color = "darkblue") +
+  geom_point(aes(y = ntaxa_mOTU), color = "darkred")
+```
+
+
 ## Filtering mOTU
 
 ```{r}
